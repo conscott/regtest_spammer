@@ -10,6 +10,7 @@ This is just a bitcoin-cli wrapper that serializes output
 to python primitives.
 
 This has been copied almost directly from the bitcoin test_framework
+because it is lit.
 """
 
 
@@ -86,7 +87,11 @@ class NodeCLI():
             p_args += [command]
         p_args += pos_args + named_args
         # print("Running bitcoin-cli command: %s" % p_args)
-        process = subprocess.Popen(p_args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        process = subprocess.Popen(p_args,
+                                   stdin=subprocess.PIPE,
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE,
+                                   universal_newlines=True)
         cli_stdout, cli_stderr = process.communicate(input=self.input)
         returncode = process.poll()
         if returncode:
