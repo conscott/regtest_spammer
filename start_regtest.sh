@@ -23,12 +23,13 @@ echo "Connecting nodes..."
 sleep 5
 
 # Have mining node add spamming node connect
-bitcoin-cli -datadir=./minerdir/ addnode 127.0.0.1:19341 onetry
-bitcoin-cli -datadir=./spamdir/ addnode 127.0.0.1:18444 onetry
+bitcoin-cli -datadir=./spamdir/ addnode 127.0.0.1:18444 add
+sleep 1
 
 echo "Mining blocks to send to spammer"
 bitcoin-cli -datadir=./minerdir/ generate 101
-bitcoin-cli -datadir=./minerdir/ sendtoaddress `bitcoin-cli -datadir=./spamdir/ getnewaddress` 1.0
+bitcoin-cli -datadir=./minerdir/ sendtoaddress `bitcoin-cli -datadir=./spamdir/ getnewaddress` '0.5'
+sleep 1
 bitcoin-cli -datadir=./minerdir/ generate 1
 sleep 1
 
