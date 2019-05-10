@@ -151,7 +151,10 @@ def create_many_utxos(at_least_a_block=False):
     outputs = {addr: amt_per_output for addr in addresses}
     # Have to use -stdin because the number of outputs and addresses may be too large
     # for bash default arg limit
-    send_many_args = ('', outputs, 1, '', addresses, False, 1008)
+    if BTC or BSV:
+        send_many_args = ('', outputs, 1, '', addresses, False, 1008)
+    else:
+        send_many_args = ('', outputs, 1, '', addresses)
     formatted_input = '\n'.join(arg_to_cli(a) for a in send_many_args)
     txid = rpc('-datadir=%s' % DATA_DIR_SPAMMER, '-stdin', input=formatted_input).sendmany()
     # txid = rpc.sendmany("", outputs, 1, "making lots of outputs", addresses, False, 2)
