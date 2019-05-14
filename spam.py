@@ -126,14 +126,20 @@ def consolidate():
                 inputs = [{'txid': u['txid'], 'vout': u['vout']} for u in to_add]
                 amt = float(sum(i['amount'] for i in to_add)) - (STD_TX_SIZE_LIMIT / COIN)
                 outputs = {rpc.getnewaddress(): amt}
-                rawtx = rpc('-datadir=%s' % DATA_DIR_SPAMMER,
-                            '-stdin',
-                            input=make_stdinput(inputs, outputs)).createrawtransaction()
-                signresult = rpc('-datadir=%s' % DATA_DIR_SPAMMER,
-                                 '-stdin', input=make_stdinput(rawtx)).signrawtransactionwithwallet()
-                txid = rpc('-datadir=%s' % DATA_DIR_SPAMMER,
-                           '-stdin',
-                           input=make_stdinput(signresult['hex'])).sendrawtransaction()
+                if REGTEST:
+                    rawtx = rpc('-datadir=%s' % DATA_DIR_SPAMMER,
+                                '-stdin',
+                                input=make_stdinput(inputs, outputs)).createrawtransaction()
+                    signresult = rpc('-datadir=%s' % DATA_DIR_SPAMMER,
+                                     '-stdin',
+                                     input=make_stdinput(rawtx)).signrawtransactionwithwallet()
+                    txid = rpc('-datadir=%s' % DATA_DIR_SPAMMER,
+                               '-stdin',
+                               input=make_stdinput(signresult['hex'])).sendrawtransaction()
+                else:
+                    rawtx = rpc('-stdin', input=make_stdinput(inputs, outputs)).createrawtransaction()
+                    signresult = rpc('-stdin', input=make_stdinput(rawtx)).signrawtransactionwithwallet()
+                    txid = rpc('-stdin', input=make_stdinput(signresult['hex'])).sendrawtransaction()
                 print("Transaction has txid %s" % txid)
             wait_for_confirmation(txs_to_confirm=consolidation_txs)
 
