@@ -65,8 +65,10 @@ TX_CHAIN_COST = round((DEFAULT_FEE * DEFAULT_ANCESTOR_LIMIT) + MIN_OUTPUT, 8)
 # data but inputs can be onther types so lets just reserve extra bytes
 if SEGWIT:
     MAX_OUTPUTS = int((STD_TX_SIZE_LIMIT - 220) / 32)
+    MAX_INPUTS = int((STD_TX_SIZE_LIMIT - 41) / 68.5)
 else:
     MAX_OUTPUTS = int((STD_TX_SIZE_LIMIT - 400) / 34)
+    MAX_INPUTS = int((STD_TX_SIZE_LIMIT - 44) / 148)
 
 
 # Going to make txs with max number of outputs that can all be independently chained in mempool
@@ -86,7 +88,7 @@ else:
 def print_debug_info():
     print("Using segwit is %s" % SEGWIT)
     print("A one input -> one output tx is %s bytes" % SIZE_OF_1_TO_1_TX)
-    print("Max number of outputs per tx is %s" % MAX_OUTPUTS)
+    print("Max number of outputs per tx is %s, and max number of inputs is %s" % (MAX_OUTPUTS, MAX_INPUTS))
     print("The cost to make a chain of 25 mempool txs is %s sat" % (TX_CHAIN_COST * COIN))
     print("A chain of 25 txs for %s outputs is %s MB" % (MAX_OUTPUTS, SPAM_SIZE_PER_OUTPUT_SET / 1000000))
 
@@ -107,13 +109,36 @@ def wait_for_confirmation(txs_to_confirm=1):
         print("Waiting for confirmation of %s tx" % txs_to_confirm)
 
 
+def make_stdinput(*args):
+    return '\n'.join(arg_to_cli(a) for a in args)
+
+
 # Consolidate all balance into single utxo before start splitting
 def consolidate():
-    utxos = rpc.listunspent()[:2]
-    balance = rpc.getbalance('*', 1)
-    if len(utxos) > 1:
-        father_of_spam = rpc.getnewaddress()
+    utxos = rpc.listunspent()
+    num_unspent = len(utxos)
+    if num_unspent > 1:
+        if num_unspent > MAX_INPUTS:
+            consolidation_txs = int(num_unspent / MAX_INPUTS) + 1
+            print("Have %s outputs that can be solididated into %s transactions" % (num_unspent, consolidation_txs))
+            for i in range(consolidation_txs):
+                to_add = utxos[i*MAX_INPUTS:(i+1)*MAX_INPUTS]
+                inputs = [{'txid': u['txid'], 'vout': u['vout']} for u in to_add]
+                amt = float(sum(i['amount'] for i in to_add)) - (STD_TX_SIZE_LIMIT / COIN)
+                outputs = {rpc.getnewaddress(): amt}
+                rawtx = rpc('-datadir=%s' % DATA_DIR_SPAMMER,
+                            '-stdin',
+                            input=make_stdinput(inputs, outputs)).createrawtransaction()
+                signresult = rpc('-datadir=%s' % DATA_DIR_SPAMMER,
+                                 '-stdin', input=make_stdinput(rawtx)).signrawtransactionwithwallet()
+                txid = rpc('-datadir=%s' % DATA_DIR_SPAMMER,
+                           '-stdin',
+                           input=make_stdinput(signresult['hex'])).sendrawtransaction()
+                print("Transaction has txid %s" % txid)
+            wait_for_confirmation(txs_to_confirm=consolidation_txs)
 
+        balance = rpc.getbalance('*', 1)
+        father_of_spam = rpc.getnewaddress()
         print("Aggregating all coins to %s" % father_of_spam)
         # Subtract fee from entire amount with conf target of one week, which should
         # be close to 1 sat / byte
@@ -156,7 +181,10 @@ def create_many_utxos(at_least_a_block=False):
     else:
         send_many_args = ('', outputs, 1, '', addresses)
     formatted_input = '\n'.join(arg_to_cli(a) for a in send_many_args)
-    txid = rpc('-datadir=%s' % DATA_DIR_SPAMMER, '-stdin', input=formatted_input).sendmany()
+    if REGTEST:
+        txid = rpc('-datadir=%s' % DATA_DIR_SPAMMER, '-stdin', input=formatted_input).sendmany()
+    else:
+        txid = rpc('-stdin', input=formatted_input).sendmany()
     # txid = rpc.sendmany("", outputs, 1, "making lots of outputs", addresses, False, 2)
     print("Transaction has txid %s" % txid)
     wait_for_confirmation()
@@ -173,13 +201,17 @@ def make_spending_chain(utxo):
             # We have hit the dust threshold, so this should be our last loop
             trigger_exit = True
             break
-        inputs = [{"txid": utxo["txid"], "vout": utxo["vout"]}]  # , "address": utxo["address"]}]
+        inputs = [{"txid": utxo["txid"], "vout": utxo["vout"]}]
         to = rpc.getnewaddress()
         outputs = {to: to_send}
         # print("Spending %s and sending %s to %s" % (utxo['txid'], to_send, to))
-        rawtx = rpc.createrawtransaction(inputs, outputs)
-        signresult = rpc.signrawtransactionwithwallet(rawtx)
-        txid = rpc.sendrawtransaction(signresult["hex"], False)
+        try:
+            rawtx = rpc.createrawtransaction(inputs, outputs)
+            signresult = rpc.signrawtransactionwithwallet(rawtx)
+            txid = rpc.sendrawtransaction(signresult["hex"], False)
+        except Exception as e:
+            print("Had a problem making chain, %s, breaking..." % str(e))
+            break
         # Set the next uxto to spend to be this transaction
         utxo = {'txid': txid, 'vout': 0, 'amount': Decimal(to_send)}
 
@@ -202,6 +234,7 @@ def start_spamming():
             mempool = rpc.getmempoolinfo()
             print("Have mempool of %s transactions and %s MB" %
                   (mempool['size'], round(mempool['bytes'] / 1048576.0, 3)))
+        time.sleep(10)
         wait_for_confirmation()
     print("All outputs have reached dust limit. Done!")
 
