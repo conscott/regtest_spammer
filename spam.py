@@ -124,7 +124,7 @@ def consolidate():
             for i in range(consolidation_txs):
                 to_add = utxos[i*MAX_INPUTS:(i+1)*MAX_INPUTS]
                 inputs = [{'txid': u['txid'], 'vout': u['vout']} for u in to_add]
-                amt = float(sum(i['amount'] for i in to_add)) - (STD_TX_SIZE_LIMIT / COIN)
+                amt = round(float(sum(i['amount'] for i in to_add)) - (STD_TX_SIZE_LIMIT / COIN), 8)
                 outputs = {rpc.getnewaddress(): amt}
                 if REGTEST:
                     rawtx = rpc('-datadir=%s' % DATA_DIR_SPAMMER,
