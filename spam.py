@@ -1,96 +1,20 @@
 #!/usr/bin/env python3
+import argparse
 import decimal
 from decimal import Decimal
 from multiprocessing.dummy import Pool as ThreadPool
 import os
 from rpc import NodeCLI, arg_to_cli
+import sys
 import time
 
-# Round down to 8 places for satoshis calcs
-decimal.getcontext().rounding = decimal.ROUND_DOWN
 
-# 1 BTC = 10^8 statoshis
-COIN = 10**8
-# Dust limit for p2pkh
-MIN_OUTPUT = 546 / COIN
-# Max standard tx size is 100k bytes
-STD_TX_SIZE_LIMIT = 100000
-# The mempool will allow a tx to have at most 25 ancestors before rejecting entry
-DEFAULT_ANCESTOR_LIMIT = 25
-# Dirs for regtest data
-DATA_DIR_SPAMMER = "./spamdir/"
-DATA_DIR_MINER = "./minerdir/"
-
-# If using segwit native addr (bech32), calculate vbytes, otherwise assuming using
-# standard p2pkh transactions
-SEGWIT = False
-
-# Get tx size estimate
-if SEGWIT:
-    # Segwit get dat discount
-    def guess_sz(num_in, num_out):
-        return num_in*68.5 + num_out*31 + 10.5
-else:
-    # P2PKH still got dat lame bytes
-    def guess_sz(num_in, num_out):
-        return num_in*148 + num_out*34 + 10
-
-# Could try this on other chains as well
-BTC = True
-BCH = False
-BSV = False
-if BTC:
-    # MAX blocksize for BTC in vbytes
-    MAX_BLOCK = 1000000
-elif BCH:
-    # MAX blocksize for BCH in bytes
-    MAX_BLOCK = 32000000
-elif BSV:
-    # MAX blocksize for BSV in bytes
-    MAX_BLOCK = 128000000
-
-
-# want 1 sat/byte for a 1 input to 1 output tx
-SIZE_OF_1_TO_1_TX = guess_sz(1, 1)
-# Want to pay 1 sat/vbyte
-DESIRED_FEE_PER_BYTE = 1
-# STD FEE
-DEFAULT_FEE = round(SIZE_OF_1_TO_1_TX * DESIRED_FEE_PER_BYTE / COIN, 8)
-# Will be making chains of 25-txs spending each other
-# and need to still be above dust limit at the end
-TX_CHAIN_COST = round((DEFAULT_FEE * DEFAULT_ANCESTOR_LIMIT) + MIN_OUTPUT, 8)
-
-# The maximum std tx size is 100k.
-# A one p2wpkh input tx has 79 vbytes and ~10 bytes for header
-# data but inputs can be onther types so lets just reserve extra bytes
-if SEGWIT:
-    MAX_OUTPUTS = int((STD_TX_SIZE_LIMIT - 220) / 32)
-    MAX_INPUTS = int((STD_TX_SIZE_LIMIT - 41) / 68.5)
-else:
-    MAX_OUTPUTS = int((STD_TX_SIZE_LIMIT - 400) / 34)
-    MAX_INPUTS = int((STD_TX_SIZE_LIMIT - 44) / 148)
-
-
-# Going to make txs with max number of outputs that can all be independently chained in mempool
-# If the entire set is less than a block you can can make multiple MAX_OUTPUT txs
-SPAM_SIZE_PER_OUTPUT_SET = (DEFAULT_ANCESTOR_LIMIT * MAX_OUTPUTS * SIZE_OF_1_TO_1_TX)
-
-REGTEST = True
-
-# Finally setup the RPC objects
-if REGTEST:
-    rpc = NodeCLI(os.getenv("BITCOINCLI", "bitcoin-cli"), datadir=DATA_DIR_SPAMMER)
-    miner = NodeCLI(os.getenv("BITCOINCLI", "bitcoin-cli"), datadir=DATA_DIR_MINER)
-else:
-    rpc = NodeCLI(os.getenv("BITCOINCLI", "bitcoin-cli"))
-
-
-def print_debug_info():
-    print("Using segwit is %s" % SEGWIT)
+def print_debug_info(args):
+    print("Using chain %s with feerate %s sat/byte" % (args.chain, args.feerate))
     print("A one input -> one output tx is %s bytes" % SIZE_OF_1_TO_1_TX)
     print("Max number of outputs per tx is %s, and max number of inputs is %s" % (MAX_OUTPUTS, MAX_INPUTS))
-    print("The cost to make a chain of 25 mempool txs is %s sat" % (TX_CHAIN_COST * COIN))
-    print("A chain of 25 txs for %s outputs is %s MB" % (MAX_OUTPUTS, SPAM_SIZE_PER_OUTPUT_SET / 1000000))
+    print("The cost to make a chain of 25 mempool txs is %s satoshis" % (TX_CHAIN_COST * COIN))
+    print("A chain of 25 txs for %s outputs is %s MB\n\n" % (MAX_OUTPUTS, SPAM_SIZE_PER_OUTPUT_SET / 1000000))
 
 
 # Get satoshis from decimal btc amount
@@ -107,6 +31,7 @@ def wait_for_confirmation(txs_to_confirm=1):
         else:
             time.sleep(60)
         print("Waiting for confirmation of %s tx" % txs_to_confirm)
+    print("Confirmed!")
 
 
 def make_stdinput(*args):
@@ -152,6 +77,7 @@ def consolidate():
         wait_for_confirmation()
         print("Sent all %s coins to %s" % (balance, father_of_spam))
     else:
+        balance = rpc.getbalance('*', 1)
         print("Starting with 1 UTXO with balance %s" % balance)
 
 
@@ -182,7 +108,7 @@ def create_many_utxos(at_least_a_block=False):
     outputs = {addr: amt_per_output for addr in addresses}
     # Have to use -stdin because the number of outputs and addresses may be too large
     # for bash default arg limit
-    if BTC or BSV:
+    if CHAIN_TO_USE in ('BTC', 'BSV'):
         send_many_args = ('', outputs, 1, '', addresses, False, 1008)
     else:
         send_many_args = ('', outputs, 1, '', addresses)
@@ -199,13 +125,11 @@ def create_many_utxos(at_least_a_block=False):
 
 # Make chain of mempool transactions spending the previous
 def make_spending_chain(utxo):
-    global trigger_exit
     # Chain of 25 unspent outputs is the longest you can make
     for i in range(DEFAULT_ANCESTOR_LIMIT):
         to_send = float(round(utxo['amount'] - Decimal(DEFAULT_FEE), 8))
         if to_send < MIN_OUTPUT:
             # We have hit the dust threshold, so this should be our last loop
-            trigger_exit = True
             break
         inputs = [{"txid": utxo["txid"], "vout": utxo["vout"]}]
         to = rpc.getnewaddress()
@@ -232,22 +156,28 @@ def spam_parallel(utxos, threads=8):
 
 # Spammers gonna spam
 def start_spamming():
-    while not trigger_exit:
-        utxos = rpc.listunspent()
-        if utxos:
-            print("Creating 25 tx chains for %s utxos, this may take some time...." % len(utxos))
-            spam_parallel(utxos)
+    init_set_size = len(rpc.listunspent())
+    print("Initial set size is %s" % init_set_size)
+    while True:
+        unspent = rpc.listunspent()
+        utxos_above_dust = [u for u in unspent if u['amount'] > (MIN_OUTPUT + DEFAULT_FEE)]
+        if utxos_above_dust:
+            print("Creating 25 tx chains for %s utxos, this may take some time...." % len(utxos_above_dust))
+            spam_parallel(utxos_above_dust)
             mempool = rpc.getmempoolinfo()
             print("Have mempool of %s transactions and %s MB" %
                   (mempool['size'], round(mempool['bytes'] / 1048576.0, 3)))
-        time.sleep(10)
-        wait_for_confirmation()
-    print("All outputs have reached dust limit. Done!")
+        elif len(unspent) == init_set_size and not utxos_above_dust:
+            print("All outputs have reached dust limit. Done!")
+            break
+
+        # If no utxos have reached the dust limit yet, we can just wait for next confirmed tx
+        # until we start spamming again, otherwise just sleep until a new one that hasn't hit
+        # dust limit is confirmed
+        wait_for_confirmation(txs_to_confirm=(len(unspent) - len(utxos_above_dust) + 1))
 
 
 def doit():
-    balance = rpc.getbalance('*', 1)
-    assert balance > 0.01, "Need higher starting balance"
     # Get all coins in 1 UTXOs, don't actually need to this first
     consolidate()
     # Split UTXO to many even amount UTXOs
@@ -256,6 +186,131 @@ def doit():
     start_spamming()
 
 
-trigger_exit = False
-print_debug_info()
-doit()
+description = """Spam a bitcoin chain with cheap transactions.
+
+    By default the program will:
+
+    1. Consolidate the entire balance into one UTXO (consolidation). This step is skipped
+       if the balance is already consolidated.
+    2. Split the entire balance in as many UTXOs as possible (split) in a single transaction.
+    3. Take each UTXO and create chains of dependent txs submitted to the mempool in a loop
+       until the program is terminated or the dust limit has been reached on all utxos"""
+
+
+# Parse arguments and pass through unrecognised args
+parser = argparse.ArgumentParser(add_help=True,
+                                 usage='%(prog)s [options]',
+                                 description=description,
+                                 formatter_class=argparse.RawTextHelpFormatter)
+parser.add_argument('--chain', default='BTC', help='Choose fork: "BTC", "BCH", or "BSV" (default: "BTC")')
+parser.add_argument('--feerate', type=int, default=1, help='Chose fee-rate for spam in sat/byte (default: 1)')
+parser.add_argument('--live',
+                    action='store_true',
+                    help='If supplied, will submit spam to local bitcoin node, rather than regtest nodes')
+parser.add_argument('--only_consolidate',
+                    action='store_true',
+                    help="Only consolidate entire balance back into 1 UTXO. This can be called after spamming.")
+parser.add_argument('--only_split',
+                    action='store_true',
+                    help="Only Split balance into many UTXOs.")
+parser.add_argument('--only_spam',
+                    action='store_true',
+                    help="Start spamming on all existing UTXOs.")
+
+args, unknown_args = parser.parse_known_args()
+
+if args.chain.upper() not in ('BTC', 'BCH', 'BSV'):
+    print("Invalid --chain choice: %s" % args.chain)
+    sys.exit(0)
+
+if unknown_args:
+    print("Unknown args: %s...Try" % unknown_args)
+    print("./spam.py --help")
+    sys.exit(0)
+
+# Round down to 8 places for satoshis calcs
+decimal.getcontext().rounding = decimal.ROUND_DOWN
+
+# 1 BTC = 10^8 statoshis
+COIN = 10**8
+# Dust limit for p2pkh
+MIN_OUTPUT = 546 / COIN
+# Max standard tx size is 100k bytes
+STD_TX_SIZE_LIMIT = 100000
+# The mempool will allow a tx to have at most 25 ancestors before rejecting entry
+DEFAULT_ANCESTOR_LIMIT = 25
+# Dirs for regtest data
+DATA_DIR_SPAMMER = "./spamdir/"
+DATA_DIR_MINER = "./minerdir/"
+
+# If using segwit native addr (bech32), calculate vbytes, otherwise assuming using
+# standard p2pkh transactions
+SEGWIT = (args.chain == 'BTC' and args.live)
+
+# Get tx size estimate
+if SEGWIT:
+    # Segwit get dat discount
+    def guess_sz(num_in, num_out):
+        return num_in*68.5 + num_out*31 + 10.5
+else:
+    # P2PKH still got dat lame bytes
+    def guess_sz(num_in, num_out):
+        return num_in*148 + num_out*34 + 10
+
+# Use btc by default, but can change
+CHAIN_TO_USE = args.chain.upper()
+if CHAIN_TO_USE == 'BTC':
+    # MAX blocksize for BTC in vbytes
+    MAX_BLOCK = 1000000
+elif CHAIN_TO_USE == 'BCH':
+    # MAX blocksize for BCH in bytes
+    MAX_BLOCK = 32000000
+elif CHAIN_TO_USE == 'BSV':
+    # MAX blocksize for BSV in bytes
+    MAX_BLOCK = 128000000
+
+
+# want 1 sat/byte for a 1 input to 1 output tx
+SIZE_OF_1_TO_1_TX = guess_sz(1, 1)
+# Want to pay 1 sat/vbyte
+DESIRED_FEE_PER_BYTE = int(args.feerate)
+# STD FEE
+DEFAULT_FEE = round(SIZE_OF_1_TO_1_TX * DESIRED_FEE_PER_BYTE / COIN, 8)
+# Will be making chains of 25-txs spending each other
+# and need to still be above dust limit at the end
+TX_CHAIN_COST = round((DEFAULT_FEE * DEFAULT_ANCESTOR_LIMIT) + MIN_OUTPUT, 8)
+
+# The maximum std tx size is 100k.
+# A one p2wpkh input tx has 79 vbytes and ~10 bytes for header
+# data but inputs can be onther types so lets just reserve extra bytes
+if SEGWIT:
+    MAX_OUTPUTS = int((STD_TX_SIZE_LIMIT - 220) / 32)
+    MAX_INPUTS = int((STD_TX_SIZE_LIMIT - 41) / 68.5)
+else:
+    MAX_OUTPUTS = int((STD_TX_SIZE_LIMIT - 400) / 34)
+    MAX_INPUTS = int((STD_TX_SIZE_LIMIT - 44) / 148)
+
+
+# Going to make txs with max number of outputs that can all be independently chained in mempool
+# If the entire set is less than a block you can can make multiple MAX_OUTPUT txs
+SPAM_SIZE_PER_OUTPUT_SET = (DEFAULT_ANCESTOR_LIMIT * MAX_OUTPUTS * SIZE_OF_1_TO_1_TX)
+
+REGTEST = not args.live
+
+# Finally setup the RPC objects
+if REGTEST:
+    rpc = NodeCLI(os.getenv("BITCOINCLI", "bitcoin-cli"), datadir=DATA_DIR_SPAMMER)
+    miner = NodeCLI(os.getenv("BITCOINCLI", "bitcoin-cli"), datadir=DATA_DIR_MINER)
+else:
+    rpc = NodeCLI(os.getenv("BITCOINCLI", "bitcoin-cli"))
+
+print_debug_info(args)
+
+if args.only_consolidate:
+    consolidate()
+elif args.only_split:
+    create_many_utxos()
+elif args.only_spam:
+    start_spamming()
+else:
+    doit()
