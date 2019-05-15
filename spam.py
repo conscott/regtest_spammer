@@ -191,8 +191,8 @@ description = """Spam a bitcoin chain with cheap transactions.
     By default the program will:
 
     1. Consolidate the entire balance into one UTXO (consolidation). This step is skipped
-       if the balance is already consolidated.
-    2. Split the entire balance in as many UTXOs as possible (split) in a single transaction.
+       if the balance is already consolidated
+    2. Split the entire balance into as many UTXOs as possible in a single transaction (split)
     3. Take each UTXO and create chains of dependent txs submitted to the mempool in a loop
        until the program is terminated or the dust limit has been reached on all utxos"""
 
