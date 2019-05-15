@@ -96,14 +96,14 @@ def decider():
         num_outputs_per_tx = int(float(confirmed_balance) / TX_CHAIN_COST)
         amt_per_output = round(confirmed_balance / Decimal(num_outputs_per_tx), 8)
 
-    print("Making transaction with %s outputs with %s btc" % (num_outputs_per_tx, amt_per_output))
     return num_outputs_per_tx, float(amt_per_output)
 
 
 # Make single transaction splitting entire wallet balance between many outputs
 def create_many_utxos(at_least_a_block=False):
     num_outputs_per_tx, amt_per_output = decider()
-    print("This can take some time to generate...")
+    print("Making transaction with %s outputs with %s btc, which can take some time..." %
+          (num_outputs_per_tx, amt_per_output))
     addresses = [rpc.getnewaddress() for i in range(num_outputs_per_tx)]
     outputs = {addr: amt_per_output for addr in addresses}
     # Have to use -stdin because the number of outputs and addresses may be too large
@@ -146,24 +146,26 @@ def make_spending_chain(utxo):
         utxo = {'txid': txid, 'vout': 0, 'amount': Decimal(to_send)}
 
 
-# function to be mapped over
-def spam_parallel(utxos, threads=8):
-    pool = ThreadPool(threads)
+# Make a thread pool to chug through the passed utxo list and go to town
+# but because of python's GIL it's not really all that parallel but better than
+# usual because rpc commands spawn separate processes. Right?
+def spam_parallel(utxos, numthreads):
+    pool = ThreadPool(numthreads)
     pool.map(make_spending_chain, utxos)
     pool.close()
     pool.join()
 
 
 # Spammers gonna spam
-def start_spamming():
+def start_spamming(numthreads=4):
     init_set_size = len(rpc.listunspent())
-    print("Initial set size is %s" % init_set_size)
     while True:
         unspent = rpc.listunspent()
         utxos_above_dust = [u for u in unspent if u['amount'] > (MIN_OUTPUT + DEFAULT_FEE)]
         if utxos_above_dust:
-            print("Creating 25 tx chains for %s utxos, this may take some time...." % len(utxos_above_dust))
-            spam_parallel(utxos_above_dust)
+            print("Creating 25 tx chains for %s utxos with %s threads, this may take some time...." %
+                  (len(utxos_above_dust), numthreads))
+            spam_parallel(utxos_above_dust, numthreads)
             mempool = rpc.getmempoolinfo()
             print("Have mempool of %s transactions and %s MB" %
                   (mempool['size'], round(mempool['bytes'] / 1048576.0, 3)))
@@ -177,13 +179,13 @@ def start_spamming():
         wait_for_confirmation(txs_to_confirm=(len(unspent) - len(utxos_above_dust) + 1))
 
 
-def doit():
+def doit(args):
     # Get all coins in 1 UTXOs, don't actually need to this first
     consolidate()
     # Split UTXO to many even amount UTXOs
     create_many_utxos()
     # See if it works
-    start_spamming()
+    start_spamming(args.numthreads)
 
 
 description = """Spam a bitcoin chain with cheap transactions.
@@ -204,6 +206,7 @@ parser = argparse.ArgumentParser(add_help=True,
                                  formatter_class=argparse.RawTextHelpFormatter)
 parser.add_argument('--chain', default='BTC', help='Choose fork: "BTC", "BCH", or "BSV" (default: "BTC")')
 parser.add_argument('--feerate', type=int, default=1, help='Chose fee-rate for spam in sat/byte (default: 1)')
+parser.add_argument('--numthreads', type=int, default=4, help='Chose the number of spam threads (default: 4)')
 parser.add_argument('--live',
                     action='store_true',
                     help='If supplied, will submit spam to local bitcoin node, rather than regtest nodes')
@@ -311,6 +314,6 @@ if args.only_consolidate:
 elif args.only_split:
     create_many_utxos()
 elif args.only_spam:
-    start_spamming()
+    start_spamming(args.numthreads)
 else:
-    doit()
+    doit(args)
