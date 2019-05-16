@@ -28,7 +28,7 @@ sleep 1
 
 echo "Mining blocks to send to spammer"
 bitcoin-cli -datadir=./minerdir/ generate 101
-bitcoin-cli -datadir=./minerdir/ sendtoaddress `bitcoin-cli -datadir=./spamdir/ getnewaddress` '1.0'
+bitcoin-cli -datadir=./minerdir/ sendtoaddress `bitcoin-cli -datadir=./spamdir/ getnewaddress` '0.05'
 sleep 1
 bitcoin-cli -datadir=./minerdir/ generate 1
 sleep 1

@@ -10,11 +10,14 @@ import time
 
 
 def print_debug_info(args):
+    print("----------- Runtime Settings -----------")
     print("Using chain %s with feerate %s sat/byte" % (args.chain, args.feerate))
     print("A one input -> one output tx is %s bytes" % SIZE_OF_1_TO_1_TX)
+    print("Default fee per tx is %s sat" % int(DEFAULT_FEE * COIN))
     print("Max number of outputs per tx is %s, and max number of inputs is %s" % (MAX_OUTPUTS, MAX_INPUTS))
-    print("The cost to make a chain of 25 mempool txs is %s satoshis" % (TX_CHAIN_COST * COIN))
-    print("A chain of 25 txs for %s outputs is %s MB\n\n" % (MAX_OUTPUTS, SPAM_SIZE_PER_OUTPUT_SET / 1000000))
+    print("The cost to make a chain of 25 mempool txs is %s satoshis" % int(TX_CHAIN_COST * COIN))
+    print("A chain of 25 txs for %s outputs is %s MB" % (MAX_OUTPUTS, SPAM_SIZE_PER_OUTPUT_SET / 1000000))
+    print("----------------------------------------\n\n")
 
 
 # Get satoshis from decimal btc amount
@@ -27,11 +30,10 @@ def wait_for_confirmation(txs_to_confirm=1):
     while len(rpc.listunspent()) < txs_to_confirm:
         if REGTEST:
             miner.generate(1)
-            time.sleep(1)
+            time.sleep(3)
         else:
             time.sleep(60)
-        print("Waiting for confirmation of %s tx" % txs_to_confirm)
-    print("Confirmed!")
+        print("Waiting for confirmation of one or more txs...")
 
 
 def make_stdinput(*args):
@@ -120,7 +122,6 @@ def create_many_utxos(at_least_a_block=False):
     # txid = rpc.sendmany("", outputs, 1, "making lots of outputs", addresses, False, 2)
     print("Transaction has txid %s" % txid)
     wait_for_confirmation()
-    print("All txs are confirmed")
 
 
 # Make chain of mempool transactions spending the previous
@@ -157,11 +158,12 @@ def spam_parallel(utxos, numthreads):
 
 
 # Spammers gonna spam
-def start_spamming(numthreads=4):
+def start_spamming(onepass=False, numthreads=4):
     init_set_size = len(rpc.listunspent())
     while True:
         unspent = rpc.listunspent()
         utxos_above_dust = [u for u in unspent if u['amount'] > (MIN_OUTPUT + DEFAULT_FEE)]
+        num_dust = len(unspent) - len(utxos_above_dust)
         if utxos_above_dust:
             print("Creating 25 tx chains for %s utxos with %s threads, this may take some time...." %
                   (len(utxos_above_dust), numthreads))
@@ -170,13 +172,19 @@ def start_spamming(numthreads=4):
             print("Have mempool of %s transactions and %s MB" %
                   (mempool['size'], round(mempool['bytes'] / 1048576.0, 3)))
         elif len(unspent) == init_set_size and not utxos_above_dust:
-            print("All outputs have reached dust limit. Done!")
+            print("All outputs have reached dust limit!")
             break
 
         # If no utxos have reached the dust limit yet, we can just wait for next confirmed tx
         # until we start spamming again, otherwise just sleep until a new one that hasn't hit
         # dust limit is confirmed
-        wait_for_confirmation(txs_to_confirm=(len(unspent) - len(utxos_above_dust) + 1))
+        print("%s tx have reached dust limit, %s remaining " % (num_dust, init_set_size - num_dust))
+
+        if onepass:
+            print("Finished one pass of spamming")
+            break
+
+        wait_for_confirmation(num_dust + 1)
 
 
 def doit(args):
@@ -185,7 +193,7 @@ def doit(args):
     # Split UTXO to many even amount UTXOs
     create_many_utxos()
     # See if it works
-    start_spamming(args.numthreads)
+    start_spamming(onepass=args.onepass, numthreads=args.numthreads)
 
 
 description = """Spam a bitcoin chain with cheap transactions.
@@ -219,6 +227,9 @@ parser.add_argument('--only_split',
 parser.add_argument('--only_spam',
                     action='store_true',
                     help="Start spamming on all existing UTXOs.")
+parser.add_argument('--onepass',
+                    action='store_true',
+                    help="Only do one pass of spamming (instead of loop)")
 
 args, unknown_args = parser.parse_known_args()
 
@@ -308,12 +319,15 @@ else:
     rpc = NodeCLI(os.getenv("BITCOINCLI", "bitcoin-cli"))
 
 print_debug_info(args)
+print(args)
 
 if args.only_consolidate:
     consolidate()
 elif args.only_split:
     create_many_utxos()
 elif args.only_spam:
-    start_spamming(args.numthreads)
+    start_spamming(onepass=args.onepass, numthreads=args.numthreads)
 else:
     doit(args)
+
+print("Done!")
