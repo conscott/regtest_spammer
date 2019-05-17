@@ -1,5 +1,5 @@
 ## Description
-Spam bitcoin (BTC, BCH, or BSV) for mempool experiments or just being an asshole. Works for regtest, testnet, or mainnet.
+Spam bitcoin (BTC, BCH, or BSV) for mempool experiments. Works for regtest, testnet, or mainnet.
 
 By default the program will:
 
