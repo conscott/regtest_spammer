@@ -5,6 +5,7 @@ from decimal import Decimal
 from multiprocessing.dummy import Pool as ThreadPool
 import os
 from rpc import NodeCLI, arg_to_cli
+from subprocess import CalledProcessError
 import sys
 import time
 
@@ -16,7 +17,7 @@ def print_debug_info(args):
     print("Default fee per tx is %s sat" % int(DEFAULT_FEE * COIN))
     print("Max number of outputs per tx is %s, and max number of inputs is %s" % (MAX_OUTPUTS, MAX_INPUTS))
     print("The cost to make a chain of 25 mempool txs is %s satoshis" % int(TX_CHAIN_COST * COIN))
-    print("A chain of 25 txs for %s outputs is %s MB" % (MAX_OUTPUTS, SPAM_SIZE_PER_OUTPUT_SET / 1000000))
+    print("A chain of 25 txs in %s outputs is %s MB" % (MAX_OUTPUTS, SPAM_SIZE_PER_OUTPUT_SET / 1000000))
     print("----------------------------------------\n\n")
 
 
@@ -165,7 +166,7 @@ def start_spamming(onepass=False, numthreads=4):
         utxos_above_dust = [u for u in unspent if u['amount'] > (MIN_OUTPUT + DEFAULT_FEE)]
         num_dust = len(unspent) - len(utxos_above_dust)
         if utxos_above_dust:
-            print("Creating 25 tx chains for %s utxos with %s threads, this may take some time...." %
+            print("Creating chain of 25 txs for %s utxos with %s threads, this may take some time...." %
                   (len(utxos_above_dust), numthreads))
             spam_parallel(utxos_above_dust, numthreads)
             mempool = rpc.getmempoolinfo()
@@ -215,6 +216,7 @@ parser = argparse.ArgumentParser(add_help=True,
 parser.add_argument('--chain', default='BTC', help='Choose fork: "BTC", "BCH", or "BSV" (default: "BTC")')
 parser.add_argument('--feerate', type=int, default=1, help='Chose fee-rate for spam in sat/byte (default: 1)')
 parser.add_argument('--numthreads', type=int, default=4, help='Chose the number of spam threads (default: 4)')
+parser.add_argument('--datadir', action='store', help='Set if custom datadir should be used')
 parser.add_argument('--live',
                     action='store_true',
                     help='If supplied, will submit spam to local bitcoin node, rather than regtest nodes')
@@ -316,10 +318,21 @@ if REGTEST:
     rpc = NodeCLI(os.getenv("BITCOINCLI", "bitcoin-cli"), datadir=DATA_DIR_SPAMMER)
     miner = NodeCLI(os.getenv("BITCOINCLI", "bitcoin-cli"), datadir=DATA_DIR_MINER)
 else:
-    rpc = NodeCLI(os.getenv("BITCOINCLI", "bitcoin-cli"))
+    if args.datadir:
+        rpc = NodeCLI(os.getenv("BITCOINCLI", "bitcoin-cli"), datadir=args.datadir)
+    else:
+        rpc = NodeCLI(os.getenv("BITCOINCLI", "bitcoin-cli"))
+
+
+# See if the rpc is callable
+try:
+    rpc.help()
+except CalledProcessError:
+    print("Cannot run bitcoin-cli either because bitcoind is not running or datadir is not found.")
+    print("Exiting...")
+    sys.exit(0)
 
 print_debug_info(args)
-print(args)
 
 if args.only_consolidate:
     consolidate()

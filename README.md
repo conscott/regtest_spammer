@@ -32,11 +32,13 @@ bitcoin-cli -datadir=./spamdir <command>
 spam.py -h
 
 optional arguments:
-  -h, --help          show this help message and exit
-  --chain CHAIN       Choose fork: "BTC", "BCH", or "BSV" (default: "BTC")
-  --feerate FEERATE   Chose fee-rate for spam in sat/byte (default: 1)
-  --live              If supplied, will submit spam to local bitcoin node, rather than regtest nodes
-  --only_consolidate  Only consolidate entire balance back into 1 UTXO. This can be called after spamming.
-  --only_split        Only Split balance into many UTXOs.
-  --only_spam         Start spamming on all existing UTXOs.
+  -h, --help               show this help message and exit
+  --chain CHAIN            Choose fork: "BTC", "BCH", or "BSV" (default: "BTC")
+  --feerate FEERATE        Chose fee-rate for spam in sat/byte (default: 1)
+  --numthreads NUMTHREADS  Chose the number of spam threads (default: 4)
+  --datadir DATADIR        Set if custom datadir should be used
+  --live                   If supplied, will submit spam to local bitcoin node, rather than regtest nodes
+  --only_consolidate       Only consolidate entire balance back into 1 UTXO. This can be called after spamming.
+  --only_split             Only Split balance into many UTXOs.
+  --only_spam              Start spamming on all existing UTXOs.
 ```
