@@ -17,7 +17,7 @@ def print_debug_info(args):
     print("Default fee per tx is %s sat" % int(DEFAULT_FEE * COIN))
     print("Max number of outputs per tx is %s, and max number of inputs is %s" % (MAX_OUTPUTS, MAX_INPUTS))
     print("The cost to make a chain of 25 mempool txs is %s satoshis" % int(TX_CHAIN_COST * COIN))
-    print("A chain of 25 txs in %s outputs is %s MB" % (MAX_OUTPUTS, SPAM_SIZE_PER_OUTPUT_SET / 1000000))
+    print("A chain of 25 txs for %s outputs is %s MB" % (MAX_OUTPUTS, SPAM_SIZE_PER_OUTPUT_SET / 1000000))
     print("----------------------------------------\n\n")
 
 
@@ -30,7 +30,11 @@ def sat(amt):
 def wait_for_confirmation(txs_to_confirm=1):
     while len(rpc.listunspent()) < txs_to_confirm:
         if REGTEST:
-            miner.generate(1)
+            try:
+                addr = miner.getnewaddress()
+                miner.generatetoaddress(1, addr)
+            except Exception:
+                miner.generate(1)
             time.sleep(3)
         else:
             time.sleep(60)
@@ -140,7 +144,11 @@ def make_spending_chain(utxo):
         try:
             rawtx = rpc.createrawtransaction(inputs, outputs)
             signresult = rpc.signrawtransactionwithwallet(rawtx)
-            txid = rpc.sendrawtransaction(signresult["hex"], False)
+            try:
+                txid = rpc.sendrawtransaction(signresult["hex"], 0)
+            except Exception:
+                txid = rpc.sendrawtransaction(signresult["hex"], False)
+
         except Exception as e:
             print("Had a problem making chain, %s, breaking..." % str(e))
             break
