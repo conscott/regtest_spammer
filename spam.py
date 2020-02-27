@@ -47,12 +47,14 @@ def make_stdinput(*args):
 
 # Consolidate all balance into single utxo before start splitting
 def consolidate():
-    utxos = rpc.listunspent()
+    # First check for unconfirmed deposits
+    utxos = rpc.listunspent(0)
     num_unspent = len(utxos)
+    wait_for_confirmation(num_unspent)
     if num_unspent > 1:
         if num_unspent > MAX_INPUTS:
             consolidation_txs = int(num_unspent / MAX_INPUTS) + 1
-            print("Have %s outputs that can be solididated into %s transactions" % (num_unspent, consolidation_txs))
+            print("Have %s outputs that can be consolididated into %s transactions" % (num_unspent, consolidation_txs))
             for i in range(consolidation_txs):
                 to_add = utxos[i*MAX_INPUTS:(i+1)*MAX_INPUTS]
                 inputs = [{'txid': u['txid'], 'vout': u['vout']} for u in to_add]
@@ -80,7 +82,11 @@ def consolidate():
         print("Aggregating all coins to %s" % father_of_spam)
         # Subtract fee from entire amount with conf target of one week, which should
         # be close to 1 sat / byte
-        rpc.sendtoaddress(father_of_spam, balance, "", "", True, False, 1008)
+
+        if CHAIN_TO_USE in ('BTC', 'BSV'):
+            rpc.sendtoaddress(father_of_spam, balance, "", "", True, False, 1008)
+        else:
+            rpc.sendtoaddress(father_of_spam, balance, "", "", True)
         wait_for_confirmation()
         print("Sent all %s coins to %s" % (balance, father_of_spam))
     else:
@@ -132,21 +138,21 @@ def create_many_utxos(at_least_a_block=False):
 # Make chain of mempool transactions spending the previous
 def make_spending_chain(utxo):
     # Chain of 25 unspent outputs is the longest you can make
+    to = rpc.getnewaddress()
     for i in range(DEFAULT_ANCESTOR_LIMIT):
         to_send = float(round(utxo['amount'] - Decimal(DEFAULT_FEE), 8))
         if to_send < MIN_OUTPUT:
             # We have hit the dust threshold, so this should be our last loop
             break
         inputs = [{"txid": utxo["txid"], "vout": utxo["vout"]}]
-        to = rpc.getnewaddress()
         outputs = {to: to_send}
         # print("Spending %s and sending %s to %s" % (utxo['txid'], to_send, to))
         try:
             rawtx = rpc.createrawtransaction(inputs, outputs)
             signresult = rpc.signrawtransactionwithwallet(rawtx)
-            try:
+            if CHAIN_TO_USE in ('BTC', 'BSV'):
                 txid = rpc.sendrawtransaction(signresult["hex"], 0)
-            except Exception:
+            else:
                 txid = rpc.sendrawtransaction(signresult["hex"], False)
 
         except Exception as e:
@@ -187,7 +193,7 @@ def start_spamming(onepass=False, numthreads=4):
         # If no utxos have reached the dust limit yet, we can just wait for next confirmed tx
         # until we start spamming again, otherwise just sleep until a new one that hasn't hit
         # dust limit is confirmed
-        print("%s tx have reached dust limit, %s remaining " % (num_dust, init_set_size - num_dust))
+        print("%s utxos have reached dust limit, %s remaining " % (num_dust, init_set_size - num_dust))
 
         if onepass:
             print("Finished one pass of spamming")
@@ -259,7 +265,7 @@ decimal.getcontext().rounding = decimal.ROUND_DOWN
 COIN = 10**8
 # Dust limit for p2pkh
 MIN_OUTPUT = 546 / COIN
-# Max standard tx size is 100k bytes
+# Max standard tx size is 100k bytes / vbytes
 STD_TX_SIZE_LIMIT = 100000
 # The mempool will allow a tx to have at most 25 ancestors before rejecting entry
 DEFAULT_ANCESTOR_LIMIT = 25

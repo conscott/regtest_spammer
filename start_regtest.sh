@@ -13,10 +13,10 @@ rm -rf ./spamdir/*
 cp miner.conf minerdir/bitcoin.conf
 cp spammer.conf spamdir/bitcoin.conf
 
-BITCOIN_VERSION=$(bitcoind --version | grep 'version v' | tr ' ' '\n' | tail -n 1)
+BITCOIN_VERSION=$(bitcoind --version | head -n 1)
 BITCOIN_MAJOR=$(echo "$BITCOIN_VERSION" | tr '.' '\n' | head -n 2 | tail -n 1)
 
-echo "Using Bitcoin Major Version $BITCOIN_MAJOR"
+echo "Using $BITCOIN_VERSION"
 
 # Start mining node
 bitcoind -datadir=./minerdir -fallbackfee='0.00000001' -daemon
