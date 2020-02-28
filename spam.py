@@ -228,7 +228,7 @@ parser = argparse.ArgumentParser(add_help=True,
                                  description=description,
                                  formatter_class=argparse.RawTextHelpFormatter)
 parser.add_argument('--chain', default='BTC', help='Choose fork: "BTC", "BCH", or "BSV" (default: "BTC")')
-parser.add_argument('--feerate', type=int, default=1, help='Chose fee-rate for spam in sat/byte (default: 1)')
+parser.add_argument('--feerate', type=float, default=1.0, help='Chose fee-rate for spam in sat/byte (default: 1)')
 parser.add_argument('--numthreads', type=int, default=4, help='Chose the number of spam threads (default: 4)')
 parser.add_argument('--datadir', action='store', help='Set if custom datadir should be used')
 parser.add_argument('--live',
@@ -261,14 +261,6 @@ if unknown_args:
 # Round down to 8 places for satoshis calcs
 decimal.getcontext().rounding = decimal.ROUND_DOWN
 
-# 1 BTC = 10^8 statoshis
-COIN = 10**8
-# Dust limit for p2pkh
-MIN_OUTPUT = 546 / COIN
-# Max standard tx size is 100k bytes / vbytes
-STD_TX_SIZE_LIMIT = 100000
-# The mempool will allow a tx to have at most 25 ancestors before rejecting entry
-DEFAULT_ANCESTOR_LIMIT = 25
 # Dirs for regtest data
 DATA_DIR_SPAMMER = "./spamdir/"
 DATA_DIR_MINER = "./minerdir/"
@@ -299,13 +291,36 @@ elif CHAIN_TO_USE == 'BSV':
     # MAX blocksize for BSV in bytes
     MAX_BLOCK = 128000000
 
+# 1 BTC = 10^8 statoshis
+COIN = 10**8
+
+# Dust limit for p2pkh
+MIN_OUTPUT = 546 / COIN
+
+# Max standard tx size
+if CHAIN_TO_USE in ('BTC', 'BCH'):
+    # BCH and BTC allow 100k txs
+    STD_TX_SIZE_LIMIT = 100000
+else:
+    # BSV allows 10 MB txs
+    STD_TX_SIZE_LIMIT = 10000000
+
+# The mempool will allow a tx to have at most 25 ancestors before rejecting entry
+DEFAULT_ANCESTOR_LIMIT = 25
 
 # want 1 sat/byte for a 1 input to 1 output tx
 SIZE_OF_1_TO_1_TX = guess_sz(1, 1)
+
 # Want to pay 1 sat/vbyte
-DESIRED_FEE_PER_BYTE = int(args.feerate)
+DESIRED_FEE_PER_BYTE = float(args.feerate)
+
+# BSV allows 0.25 sats/byte
+if CHAIN_TO_USE == 'BSV':
+    DESIRED_FEE_PER_BYTE = 0.25
+
 # STD FEE
 DEFAULT_FEE = round(SIZE_OF_1_TO_1_TX * DESIRED_FEE_PER_BYTE / COIN, 8)
+
 # Will be making chains of 25-txs spending each other
 # and need to still be above dust limit at the end
 TX_CHAIN_COST = round((DEFAULT_FEE * DEFAULT_ANCESTOR_LIMIT) + MIN_OUTPUT, 8)
