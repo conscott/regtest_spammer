@@ -64,9 +64,14 @@ def consolidate():
                     rawtx = rpc('-datadir=%s' % DATA_DIR_SPAMMER,
                                 '-stdin',
                                 input=make_stdinput(inputs, outputs)).createrawtransaction()
-                    signresult = rpc('-datadir=%s' % DATA_DIR_SPAMMER,
-                                     '-stdin',
-                                     input=make_stdinput(rawtx)).signrawtransactionwithwallet()
+                    if CHAIN_TO_USE in ('BTC', 'BCH',): 
+                        signresult = rpc('-datadir=%s' % DATA_DIR_SPAMMER,
+                                         '-stdin',
+                                         input=make_stdinput(rawtx)).signrawtransactionwithwallet()
+                    else:
+                        signresult = rpc('-datadir=%s' % DATA_DIR_SPAMMER,
+                                         '-stdin',
+                                         input=make_stdinput(rawtx)).signrawtransaction()
                     txid = rpc('-datadir=%s' % DATA_DIR_SPAMMER,
                                '-stdin',
                                input=make_stdinput(signresult['hex'])).sendrawtransaction()
@@ -83,7 +88,7 @@ def consolidate():
         # Subtract fee from entire amount with conf target of one week, which should
         # be close to 1 sat / byte
 
-        if CHAIN_TO_USE in ('BTC', 'BSV'):
+        if CHAIN_TO_USE in ('BTC',):
             rpc.sendtoaddress(father_of_spam, balance, "", "", True, False, 1008)
         else:
             rpc.sendtoaddress(father_of_spam, balance, "", "", True)
@@ -115,13 +120,13 @@ def decider():
 # Make single transaction splitting entire wallet balance between many outputs
 def create_many_utxos(at_least_a_block=False):
     num_outputs_per_tx, amt_per_output = decider()
-    print("Making transaction with %s outputs with %s btc, which can take some time..." %
+    print("Making transaction with %s outputs with %.8f btc, which can take some time..." %
           (num_outputs_per_tx, amt_per_output))
     addresses = [rpc.getnewaddress() for i in range(num_outputs_per_tx)]
     outputs = {addr: amt_per_output for addr in addresses}
     # Have to use -stdin because the number of outputs and addresses may be too large
     # for bash default arg limit
-    if CHAIN_TO_USE in ('BTC', 'BSV'):
+    if CHAIN_TO_USE in ('BTC',):
         send_many_args = ('', outputs, 1, '', addresses, False, 1008)
     else:
         send_many_args = ('', outputs, 1, '', addresses)
@@ -149,8 +154,11 @@ def make_spending_chain(utxo):
         # print("Spending %s and sending %s to %s" % (utxo['txid'], to_send, to))
         try:
             rawtx = rpc.createrawtransaction(inputs, outputs)
-            signresult = rpc.signrawtransactionwithwallet(rawtx)
-            if CHAIN_TO_USE in ('BTC', 'BSV'):
+            if CHAIN_TO_USE in ('BTC','BCH'):
+                signresult = rpc.signrawtransactionwithwallet(rawtx)
+            else:
+                signresult = rpc.signrawtransaction(rawtx)
+            if CHAIN_TO_USE in ('BTC',):
                 txid = rpc.sendrawtransaction(signresult["hex"], 0)
             else:
                 txid = rpc.sendrawtransaction(signresult["hex"], False)
@@ -302,8 +310,8 @@ if CHAIN_TO_USE in ('BTC', 'BCH'):
     # BCH and BTC allow 100k txs
     STD_TX_SIZE_LIMIT = 100000
 else:
-    # BSV allows 10 MB txs
-    STD_TX_SIZE_LIMIT = 10000000
+    # BSV allows 10 MB txs, but still have fee limits
+    STD_TX_SIZE_LIMIT = 100000
 
 # The mempool will allow a tx to have at most 25 ancestors before rejecting entry
 DEFAULT_ANCESTOR_LIMIT = 25
@@ -311,12 +319,13 @@ DEFAULT_ANCESTOR_LIMIT = 25
 # want 1 sat/byte for a 1 input to 1 output tx
 SIZE_OF_1_TO_1_TX = guess_sz(1, 1)
 
-# Want to pay 1 sat/vbyte
-DESIRED_FEE_PER_BYTE = float(args.feerate)
-
 # BSV allows 0.25 sats/byte
 if CHAIN_TO_USE == 'BSV':
-    DESIRED_FEE_PER_BYTE = 0.25
+    # args.feerate = 0.25
+    pass
+
+# Want to pay 1 sat/vbyte
+DESIRED_FEE_PER_BYTE = float(args.feerate)
 
 # STD FEE
 DEFAULT_FEE = round(SIZE_OF_1_TO_1_TX * DESIRED_FEE_PER_BYTE / COIN, 8)
