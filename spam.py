@@ -145,7 +145,7 @@ def decider():
 # Make single transaction splitting entire wallet balance between many outputs
 def create_many_utxos(at_least_a_block=False):
     num_outputs_per_tx, amt_per_output = decider()
-    print("Making %s transaction(s) with %s outputs with %.8f btc each, which can take some time..." %
+    print("Making transaction with %s outputs with %.8f btc each, which can take some time..." %
           (num_outputs_per_tx, amt_per_output))
     addresses = [rpc.getnewaddress() for i in range(num_outputs_per_tx)]
     outputs = {addr: amt_per_output for addr in addresses}
@@ -291,7 +291,7 @@ DATA_DIR_MINER = "./minerdir/"
 
 # If using segwit native addr (bech32), calculate vbytes, otherwise assuming using
 # standard p2pkh transactions
-SEGWIT = (args.chain == 'BTC' and args.live)
+SEGWIT = (args.chain == 'BTC')
 
 # Get tx size estimate
 if SEGWIT:
